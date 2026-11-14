@@ -102,6 +102,24 @@
   .preview table{margin:0; box-shadow:none}
   .fmt{margin-top:6px; font-size:.78rem; color:var(--muted)}
   code{background:var(--soft); padding:1px 5px; border-radius:4px; font-size:.8rem}
+  .histwrap{margin-top:44px; border-top:2px solid var(--line); padding-top:24px}
+  .histhead{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px}
+  .histhead h2{font-size:1.15rem; color:var(--accent-dark)}
+  .clearhist{background:none; border:1px solid var(--line); color:var(--muted); padding:7px 14px; border-radius:7px; cursor:pointer; font-size:.82rem; font-weight:600}
+  .clearhist:hover{border-color:var(--danger); color:var(--danger)}
+  .histempty{color:var(--muted); font-size:.88rem; padding:14px 0}
+  .histlist{display:flex; flex-direction:column; gap:10px}
+  .histitem{background:#fff; border:1px solid var(--line); border-radius:9px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; transition:.12s}
+  .histitem:hover{box-shadow:0 2px 10px rgba(42,26,14,.08); border-color:var(--accent)}
+  .histinfo{flex:1; min-width:0; cursor:pointer}
+  .histtitle{font-weight:700; font-size:.95rem; color:var(--ink); display:flex; gap:8px; align-items:baseline; flex-wrap:wrap}
+  .histtitle .nf{color:var(--accent-dark); font-size:.82rem; font-weight:600}
+  .histmeta{font-size:.8rem; color:var(--muted); margin-top:4px}
+  .histval{font-weight:700; color:var(--accent-dark); white-space:nowrap}
+  .histbranches{font-size:.78rem; color:var(--muted); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .histdel{background:none; border:none; cursor:pointer; font-size:1.2rem; color:var(--muted); padding:6px 8px; border-radius:6px; flex-shrink:0; line-height:1}
+  .histdel:hover{background:#fdecea; color:var(--danger)}
+  .histopen{font-size:.76rem; color:var(--accent-dark); font-weight:600; margin-top:3px}
   .nfinfo{margin-top:24px}
   .nfgrid{display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-top:6px}
   @media(max-width:560px){.nfgrid{grid-template-columns:1fr}}
@@ -114,7 +132,7 @@
   @media print{
     @page{margin:14mm}
     body{background:#fff; padding:0}
-    header, .steps, .apikey, .nfinfo, .run, .exportrow, details, .warnbox{display:none !important}
+    header, .steps, .apikey, .nfinfo, .run, .exportrow, details, .warnbox, .histwrap{display:none !important}
     .wrap{max-width:100%; padding:0}
     .results{display:block !important; margin:0}
     .printhead{display:block}
@@ -228,6 +246,16 @@
       <summary>Ver detalhamento por produto</summary>
       <div class="preview" id="detailPreview"></div>
     </details>
+  </div>
+
+  <!-- HISTÓRICO -->
+  <div class="histwrap" id="histWrap">
+    <div class="histhead">
+      <h2>📋 Histórico de distribuições</h2>
+      <button id="clearHist" class="clearhist">Limpar tudo</button>
+    </div>
+    <div id="histList" class="histlist"></div>
+    <p class="histempty" id="histEmpty">Nenhuma distribuição salva ainda. Ao calcular um rateio, ele é salvo aqui automaticamente.</p>
   </div>
 </div>
 
@@ -434,6 +462,82 @@ function render(res){
   document.getElementById('results').scrollIntoView({behavior:'smooth'});
 }
 
+// ---------- histórico (localStorage) ----------
+const HIST_KEY='miashop_rateio_hist';
+function loadHist(){
+  try{ return JSON.parse(localStorage.getItem(HIST_KEY)||'[]'); }catch(e){ return []; }
+}
+function storeHist(arr){
+  try{ localStorage.setItem(HIST_KEY, JSON.stringify(arr)); }catch(e){}
+}
+function saveHistItem(res){
+  const arr=loadHist();
+  arr.unshift({
+    id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+    data: new Date().toISOString(),
+    fornecedor: document.getElementById('fornecedor').value.trim(),
+    nota: document.getElementById('numnota').value.trim(),
+    total: res.total,
+    linhas: res.linhas,
+    detail: res.detail,
+    semCusto: res.semCusto
+  });
+  storeHist(arr.slice(0,200)); // limite de segurança
+  renderHist();
+}
+function renderHist(){
+  const arr=loadHist();
+  const list=document.getElementById('histList');
+  const empty=document.getElementById('histEmpty');
+  const clearBtn=document.getElementById('clearHist');
+  list.innerHTML='';
+  if(arr.length===0){ empty.style.display='block'; clearBtn.style.display='none'; return; }
+  empty.style.display='none'; clearBtn.style.display='inline-block';
+  for(const it of arr){
+    const d=new Date(it.data);
+    const dataFmt=d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    const nBranches=it.linhas.length;
+    const branchNames=it.linhas.map(l=>l.filial).join(', ');
+    const el=document.createElement('div');
+    el.className='histitem';
+    el.innerHTML=`
+      <div class="histinfo" data-open="${it.id}">
+        <div class="histtitle">
+          ${it.fornecedor?it.fornecedor:'<span style="color:var(--muted)">Sem fornecedor</span>'}
+          ${it.nota?`<span class="nf">NF ${it.nota}</span>`:''}
+        </div>
+        <div class="histmeta">${dataFmt} · ${nBranches} filial(is)</div>
+        <div class="histbranches">${branchNames}</div>
+        <div class="histopen">↗ clique para reabrir</div>
+      </div>
+      <div style="text-align:right">
+        <div class="histval">${BRL(it.total)}</div>
+      </div>
+      <button class="histdel" data-del="${it.id}" title="Excluir">🗑️</button>`;
+    list.appendChild(el);
+  }
+  list.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(confirm('Excluir esta distribuição do histórico?')){
+      storeHist(loadHist().filter(x=>x.id!==b.dataset.del));
+      renderHist();
+    }
+  }));
+  list.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{
+    const it=loadHist().find(x=>x.id===b.dataset.open);
+    if(!it) return;
+    document.getElementById('fornecedor').value=it.fornecedor||'';
+    document.getElementById('numnota').value=it.nota||'';
+    render({total:it.total, linhas:it.linhas, detail:it.detail, semCusto:it.semCusto||[]});
+  }));
+}
+document.getElementById('clearHist').addEventListener('click',()=>{
+  if(confirm('Limpar TODO o histórico de distribuições? Esta ação não pode ser desfeita.')){
+    storeHist([]); renderHist();
+  }
+});
+renderHist();
+
 // ---------- ligações de UI ----------
 function bindDrop(dropId, textId, inputId, statusId, kind){
   const drop=document.getElementById(dropId);
@@ -502,7 +606,9 @@ document.getElementById('runBtn').addEventListener('click',async()=>{
     if(Object.keys(custoMap).length===0) throw new Error('Nenhum custo válido encontrado na planilha 1.');
     const dist=parseDist(distData.rows);
     if(dist.length===0) throw new Error('Nenhuma distribuição válida encontrada na planilha 2.');
-    render(calcular(custoMap,dist));
+    const resultado=calcular(custoMap,dist);
+    render(resultado);
+    saveHistItem(resultado);
   }catch(err){
     alert('Erro: '+err.message);
   }
