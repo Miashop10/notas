@@ -579,7 +579,9 @@ function renderHist(){
     if(!it) return;
     const f = b.dataset.kind==='custo' ? it.arqCusto : it.arqDist;
     if(!f || !f.url) return;
-    const a=document.createElement('a'); a.href=f.url; a.download=f.nome||'planilha'; a.click();
+    const a=document.createElement('a'); a.href=f.url; a.download=f.nome||'planilha';
+    a.style.display='none'; document.body.appendChild(a); a.click();
+    setTimeout(()=>document.body.removeChild(a),1500);
   }));
   list.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{
     const it=loadHist().find(x=>x.id===b.dataset.open);
@@ -594,6 +596,63 @@ document.getElementById('clearHist').addEventListener('click',()=>{
   if(confirm('Limpar TODO o histórico de distribuições? Esta ação não pode ser desfeita.')){
     storeHist([]); renderHist();
   }
+});
+
+// ---------- exportar / importar histórico ----------
+function baixarArquivo(blob, nome){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=nome;
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+}
+document.getElementById('exportHist').addEventListener('click',()=>{
+  try{
+    const arr=loadHist();
+    if(arr.length===0){ alert('O histórico está vazio — nada para exportar.'); return; }
+    const pacote={
+      tipo:'miashop-rateio-historico',
+      versao:1,
+      exportadoEm:new Date().toISOString(),
+      quantidade:arr.length,
+      distribuicoes:arr
+    };
+    const blob=new Blob([JSON.stringify(pacote,null,2)],{type:'application/json'});
+    const hoje=new Date().toISOString().slice(0,10);
+    baixarArquivo(blob, `historico_rateio_miashop_${hoje}.json`);
+  }catch(err){
+    alert('Erro ao exportar: '+err.message);
+  }
+});
+document.getElementById('importHist').addEventListener('click',()=>document.getElementById('importFile').click());
+document.getElementById('importFile').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const pacote=JSON.parse(r.result);
+      const novos = Array.isArray(pacote) ? pacote : (pacote.distribuicoes||[]);
+      if(!Array.isArray(novos) || novos.length===0){ alert('Arquivo não contém distribuições válidas.'); return; }
+      const atual=loadHist();
+      const idsExistentes=new Set(atual.map(x=>x.id));
+      const aMesclar=novos.filter(x=>x && x.id && !idsExistentes.has(x.id));
+      const substituir = atual.length>0 ? confirm(`O arquivo tem ${novos.length} distribuição(ões).\n\nOK = juntar com o histórico atual (${atual.length} itens, sem duplicar).\nCancelar = substituir todo o histórico atual pelo do arquivo.`) : true;
+      let resultado;
+      if(substituir){
+        resultado=[...aMesclar, ...atual].sort((a,b)=>new Date(b.data)-new Date(a.data));
+      } else {
+        resultado=novos.slice();
+      }
+      try{ storeHist(resultado.slice(0,200)); renderHist();
+        alert(substituir ? `Importado! ${aMesclar.length} nova(s) distribuição(ões) adicionada(s).` : `Histórico substituído por ${novos.length} distribuição(ões).`);
+      }catch(err){ alert('Não foi possível salvar: o histórico pode exceder o limite do navegador. Tente importar menos itens.'); }
+    }catch(err){ alert('Arquivo inválido: '+err.message); }
+    e.target.value='';
+  };
+  r.readAsText(file);
 });
 renderHist();
 
